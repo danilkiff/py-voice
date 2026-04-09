@@ -9,6 +9,8 @@ requires-python = ">=3.11"
 dependencies = [
     "faster-whisper>=1.1.0",
     "gradio>=5.0.0",
+    "httpx>=0.28.0",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -27,11 +29,11 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-addopts = "-ra --strict-markers --cov=device --cov=transcriber --cov=app --cov=main --cov-branch --cov-report=term-missing"
+addopts = "-ra --strict-markers --cov=device --cov=transcriber --cov=app --cov=main --cov=config --cov=summarizer --cov-branch --cov-report=term-missing"
 
 [tool.coverage.run]
 branch = true
-source = ["device", "transcriber", "app", "main"]
+source = ["device", "transcriber", "app", "main", "config", "summarizer"]
 
 [tool.coverage.report]
 show_missing = true

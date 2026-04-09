@@ -1,0 +1,4 @@
+ollama:
+  host: localhost
+  port: 11434
+  model: gemma4:e4b

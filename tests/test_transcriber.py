@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.conftest import FakeInfo, FakeModel, FakeSegment, RecordingLoader
 from transcriber import (
     Transcriber,
     TranscriptionResult,
@@ -17,9 +18,6 @@ from transcriber import (
     join_segments,
     validate_audio_path,
 )
-
-from tests.conftest import FakeInfo, FakeModel, FakeSegment, RecordingLoader
-
 
 # ---------- TranscriptionResult ----------
 

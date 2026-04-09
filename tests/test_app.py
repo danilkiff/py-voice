@@ -4,19 +4,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 import app
 from app import (
     DEFAULT_MODEL,
     EMPTY_INPUT_MESSAGE,
+    EMPTY_TRANSCRIPT_MESSAGE,
     MODEL_CHOICES,
+    OLLAMA_UNAVAILABLE,
     build_app,
     format_header,
     make_run_handler,
+    make_summarize_handler,
     write_text_file,
 )
 from transcriber import TranscriptionResult
-
 
 # ---------- constants ----------
 
@@ -161,6 +162,57 @@ class TestDefaultTranscribe:
         assert seen == {"audio": "/x.mp3", "model_size": "small"}
 
 
+# ---------- make_summarize_handler ----------
+
+
+def _fake_summarize(text: str) -> str:
+    return f"summary-of:{text}"
+
+
+class TestMakeSummarizeHandler:
+    def test_empty_string_returns_empty_transcript_message(self):
+        summarize = make_summarize_handler(summarize_fn=_fake_summarize)
+        assert summarize("") == EMPTY_TRANSCRIPT_MESSAGE
+
+    def test_whitespace_only_returns_empty_transcript_message(self):
+        summarize = make_summarize_handler(summarize_fn=_fake_summarize)
+        assert summarize("   ") == EMPTY_TRANSCRIPT_MESSAGE
+
+    def test_valid_transcript_returns_summary(self):
+        summarize = make_summarize_handler(summarize_fn=_fake_summarize)
+        assert summarize("реальный текст") == "summary-of:реальный текст"
+
+    def test_summarize_fn_receives_full_transcript(self):
+        seen: list[str] = []
+
+        def spy(text: str) -> str:
+            seen.append(text)
+            return "ok"
+
+        make_summarize_handler(summarize_fn=spy)("некоторый текст")
+        assert seen == ["некоторый текст"]
+
+    def test_exception_returns_ollama_unavailable(self):
+        def boom(text: str) -> str:
+            raise ConnectionError("refused")
+
+        summarize = make_summarize_handler(summarize_fn=boom)
+        assert summarize("текст") == OLLAMA_UNAVAILABLE
+
+    def test_default_summarize_fn_used_when_not_injected(self, monkeypatch):
+        called = {}
+
+        def fake_default(text: str) -> str:
+            called["text"] = text
+            return "краткое содержание"
+
+        monkeypatch.setattr(app, "_default_summarize", fake_default)
+        summarize = app.make_summarize_handler()
+        result = summarize("входной текст")
+        assert result == "краткое содержание"
+        assert called["text"] == "входной текст"
+
+
 # ---------- build_app smoke test ----------
 
 
@@ -168,11 +220,13 @@ class TestBuildApp:
     def test_returns_gradio_blocks(self):
         import gradio as gr
 
-        instance = build_app(transcribe_fn=_fake_transcribe)
+        instance = build_app(
+            transcribe_fn=_fake_transcribe, summarize_fn=_fake_summarize
+        )
         assert isinstance(instance, gr.Blocks)
 
     def test_default_call_does_not_raise(self):
-        # No transcribe_fn argument — uses module default.
+        # No arguments — uses module defaults.
         import gradio as gr
 
         instance = build_app()
