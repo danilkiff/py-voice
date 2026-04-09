@@ -19,8 +19,10 @@ uv run pytest
 # preload: Systran/faster-whisper-{tiny,base,small,medium,large-v3}
 # ~/.cache/huggingface/hub/ or override HF_HOME
 uv run hf download Systran/faster-whisper-large-v3
-# listen 0.0.0.0:7860
+# run python stack: UI 0.0.0.0:7860
 uv run main.py
+# run compose stack: UI on 0.0.0.0:7860, Ollama on 0.0.0.0:11434
+docker compose up --build
 ```
 
 ## License
