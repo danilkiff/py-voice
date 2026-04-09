@@ -79,3 +79,38 @@ class TestLoadConfig:
         f.write_text("ollama:\n  host: strhost\n", encoding="utf-8")
         cfg = load_config(str(f))
         assert cfg.host == "strhost"
+
+
+# ---------- env var overrides ----------
+
+
+class TestLoadConfigEnvVars:
+    def test_env_host_overrides_yaml(self, tmp_path, monkeypatch):
+        f = tmp_path / "config.yaml"
+        f.write_text("ollama:\n  host: fromfile\n", encoding="utf-8")
+        monkeypatch.setenv("OLLAMA_HOST", "fromenv")
+        assert load_config(f).host == "fromenv"
+
+    def test_env_port_overrides_yaml(self, tmp_path, monkeypatch):
+        f = tmp_path / "config.yaml"
+        f.write_text("ollama:\n  port: 9999\n", encoding="utf-8")
+        monkeypatch.setenv("OLLAMA_PORT", "1234")
+        assert load_config(f).port == 1234
+
+    def test_env_model_overrides_yaml(self, tmp_path, monkeypatch):
+        f = tmp_path / "config.yaml"
+        f.write_text("ollama:\n  model: fromfile\n", encoding="utf-8")
+        monkeypatch.setenv("OLLAMA_MODEL", "fromenv")
+        assert load_config(f).model == "fromenv"
+
+    def test_env_overrides_defaults_when_no_file(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("OLLAMA_HOST", "docker-host")
+        cfg = load_config(tmp_path / "nonexistent.yaml")
+        assert cfg.host == "docker-host"
+        assert cfg.port == DEFAULT_PORT
+
+    def test_yaml_wins_over_defaults_when_no_env(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("OLLAMA_HOST", raising=False)
+        f = tmp_path / "config.yaml"
+        f.write_text("ollama:\n  host: yamlhost\n", encoding="utf-8")
+        assert load_config(f).host == "yamlhost"
