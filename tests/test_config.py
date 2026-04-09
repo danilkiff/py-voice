@@ -36,81 +36,24 @@ class TestOllamaConfig:
 
 
 class TestLoadConfig:
-    def test_missing_file_returns_defaults(self, tmp_path):
-        cfg = load_config(tmp_path / "nonexistent.yaml")
-        assert cfg == OllamaConfig()
-
-    def test_full_yaml(self, tmp_path):
-        f = tmp_path / "config.yaml"
-        f.write_text(
-            "ollama:\n  host: 192.168.1.1\n  port: 12345\n  model: llama3\n",
-            encoding="utf-8",
-        )
-        cfg = load_config(f)
-        assert cfg.host == "192.168.1.1"
-        assert cfg.port == 12345
-        assert cfg.model == "llama3"
-
-    def test_partial_yaml_fills_defaults(self, tmp_path):
-        f = tmp_path / "config.yaml"
-        f.write_text("ollama:\n  host: myserver\n", encoding="utf-8")
-        cfg = load_config(f)
-        assert cfg.host == "myserver"
-        assert cfg.port == DEFAULT_PORT
-        assert cfg.model == DEFAULT_MODEL
-
-    def test_empty_file_returns_defaults(self, tmp_path):
-        f = tmp_path / "config.yaml"
-        f.write_text("", encoding="utf-8")
-        assert load_config(f) == OllamaConfig()
-
-    def test_no_ollama_section_returns_defaults(self, tmp_path):
-        f = tmp_path / "config.yaml"
-        f.write_text("other:\n  key: value\n", encoding="utf-8")
-        assert load_config(f) == OllamaConfig()
-
-    def test_port_as_string_is_coerced(self, tmp_path):
-        f = tmp_path / "config.yaml"
-        f.write_text("ollama:\n  port: '8080'\n", encoding="utf-8")
-        assert load_config(f).port == 8080
-
-    def test_accepts_str_path(self, tmp_path):
-        f = tmp_path / "config.yaml"
-        f.write_text("ollama:\n  host: strhost\n", encoding="utf-8")
-        cfg = load_config(str(f))
-        assert cfg.host == "strhost"
-
-
-# ---------- env var overrides ----------
-
-
-class TestLoadConfigEnvVars:
-    def test_env_host_overrides_yaml(self, tmp_path, monkeypatch):
-        f = tmp_path / "config.yaml"
-        f.write_text("ollama:\n  host: fromfile\n", encoding="utf-8")
-        monkeypatch.setenv("OLLAMA_HOST", "fromenv")
-        assert load_config(f).host == "fromenv"
-
-    def test_env_port_overrides_yaml(self, tmp_path, monkeypatch):
-        f = tmp_path / "config.yaml"
-        f.write_text("ollama:\n  port: 9999\n", encoding="utf-8")
-        monkeypatch.setenv("OLLAMA_PORT", "1234")
-        assert load_config(f).port == 1234
-
-    def test_env_model_overrides_yaml(self, tmp_path, monkeypatch):
-        f = tmp_path / "config.yaml"
-        f.write_text("ollama:\n  model: fromfile\n", encoding="utf-8")
-        monkeypatch.setenv("OLLAMA_MODEL", "fromenv")
-        assert load_config(f).model == "fromenv"
-
-    def test_env_overrides_defaults_when_no_file(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("OLLAMA_HOST", "docker-host")
-        cfg = load_config(tmp_path / "nonexistent.yaml")
-        assert cfg.host == "docker-host"
-        assert cfg.port == DEFAULT_PORT
-
-    def test_yaml_wins_over_defaults_when_no_env(self, tmp_path, monkeypatch):
+    def test_returns_defaults_when_no_env(self, monkeypatch):
         monkeypatch.delenv("OLLAMA_HOST", raising=False)
-        f = tmp_path / "config.yaml"
-        f.write_text("ollama:\n  host: yamlhost\n", encoding="utf-8")
-        assert load_config(f).host == "yamlhost"
+        monkeypatch.delenv("OLLAMA_PORT", raising=False)
+        monkeypatch.delenv("OLLAMA_MODEL", raising=False)
+        assert load_config() == OllamaConfig()
+
+    def test_env_host(self, monkeypatch):
+        monkeypatch.setenv("OLLAMA_HOST", "myhost")
+        assert load_config().host == "myhost"
+
+    def test_env_port(self, monkeypatch):
+        monkeypatch.setenv("OLLAMA_PORT", "1234")
+        assert load_config().port == 1234
+
+    def test_env_model(self, monkeypatch):
+        monkeypatch.setenv("OLLAMA_MODEL", "llama3")
+        assert load_config().model == "llama3"
+
+    def test_env_port_as_string_is_coerced(self, monkeypatch):
+        monkeypatch.setenv("OLLAMA_PORT", "8080")
+        assert load_config().port == 8080

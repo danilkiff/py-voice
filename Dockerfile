@@ -12,7 +12,7 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --no-dev --frozen
 
-COPY *.py config.yaml ./
+COPY *.py ./
 
 EXPOSE 7860
 

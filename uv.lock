@@ -1131,7 +1131,6 @@ dependencies = [
     { name = "faster-whisper" },
     { name = "gradio" },
     { name = "httpx" },
-    { name = "pyyaml" },
 ]
 
 [package.optional-dependencies]
@@ -1154,7 +1153,6 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28.0" },
     { name = "nvidia-cublas-cu12", marker = "extra == 'cuda'" },
     { name = "nvidia-cudnn-cu12", marker = "extra == 'cuda'", specifier = "==9.*" },
-    { name = "pyyaml", specifier = ">=6.0" },
 ]
 provides-extras = ["cuda"]
 
