@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "→ ruff fix"
+uv run ruff check --fix --select I .
+uv run ruff format .
+
+# Re-stage files that ruff may have modified
+git diff --name-only | xargs -r git add
+
+echo "→ tests"
+uv run pytest --no-header -q
