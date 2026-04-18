@@ -456,6 +456,21 @@ class TestParseSubtitleTimed:
         segments = parse_subtitle_timed(raw)
         assert segments[0][0] == 5400.0
 
+    def test_two_digit_milliseconds(self):
+        raw = "00:00:01.12 --> 00:00:02.00\ntext"
+        segments = parse_subtitle_timed(raw)
+        assert segments[0][0] == 1.12
+
+    def test_one_digit_milliseconds(self):
+        raw = "00:00:01.5 --> 00:00:02.0\ntext"
+        segments = parse_subtitle_timed(raw)
+        assert segments[0][0] == 1.5
+
+    def test_four_digit_milliseconds_truncated(self):
+        raw = "00:00:01.1234 --> 00:00:02.0000\ntext"
+        segments = parse_subtitle_timed(raw)
+        assert segments[0][0] == 1.123
+
     def test_skips_empty_cue_after_tag_strip(self):
         raw = "00:00:01.000 --> 00:00:02.000\n<c></c>"
         segments = parse_subtitle_timed(raw)

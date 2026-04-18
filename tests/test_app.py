@@ -251,9 +251,8 @@ class TestBuildThumbnailHtml:
         assert "https://cdn/M0.jpg" in html
         assert "object-fit:none" in html
 
-    def test_returns_empty_for_non_storyboard(self):
+    def test_returns_empty_for_none(self):
         assert _build_thumbnail_html(None, 0.0) == ""
-        assert _build_thumbnail_html("not a storyboard", 0.0) == ""
 
 
 # ---------- _group_timed_segments ----------

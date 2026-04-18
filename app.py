@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
-from typing import Callable, Iterator
+from typing import TYPE_CHECKING, Callable, Iterator
+
+if TYPE_CHECKING:  # pragma: no cover
+    from youtube import StoryboardInfo
 
 import gradio as gr
 
@@ -51,11 +54,11 @@ def _format_timecode(seconds: float) -> str:
     return f"{m}:{s:02d}"
 
 
-def _build_thumbnail_html(storyboard: object, seconds: float) -> str:
+def _build_thumbnail_html(storyboard: StoryboardInfo | None, seconds: float) -> str:
     """Return an <img> tag with CSS cropping for a storyboard sprite."""
-    from youtube import StoryboardInfo, thumbnail_url_for_time
+    from youtube import thumbnail_url_for_time
 
-    if not isinstance(storyboard, StoryboardInfo):
+    if storyboard is None:
         return ""
     sprite_url, x, y = thumbnail_url_for_time(storyboard, seconds)
     w, h = storyboard.width, storyboard.height
@@ -95,7 +98,12 @@ def _streaming_reduce(
     summarize_fn: Callable[[str], str],
     output_prefix: str,
 ) -> Iterator[str]:
-    """Reduce phase with per-call progress yields."""
+    """Reduce phase with per-call progress yields.
+
+    Mirrors the recursive reduce logic of ``map_reduce_summarize`` but
+    yields progress between LLM calls.  Keep in sync with
+    ``map_reduce.py:map_reduce_summarize``.
+    """
     from map_reduce import MAX_REDUCE_DEPTH, MAX_REDUCE_INPUT, chunk_text
 
     text = combined

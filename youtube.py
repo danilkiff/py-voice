@@ -24,7 +24,7 @@ INVALID_URL_MESSAGE = "Некорректная ссылка на YouTube."
 _VTT_TIMESTAMP_RE = re.compile(
     r"^\d{2}:\d{2}[:\.][\d.]+ --> \d{2}:\d{2}[:\.][\d.]+.*$", re.MULTILINE
 )
-_VTT_TIMED_RE = re.compile(r"^(\d{2}):(\d{2}):(\d{2})[.,](\d{3})\s+-->", re.MULTILINE)
+_VTT_TIMED_RE = re.compile(r"^(\d{2}):(\d{2}):(\d{2})[.,](\d+)\s+-->", re.MULTILINE)
 _VTT_TAG_RE = re.compile(r"<[^>]+>")
 _SRT_INDEX_RE = re.compile(r"^\d+\s*$", re.MULTILINE)
 
@@ -119,12 +119,8 @@ def parse_subtitle_timed(raw: str) -> tuple[tuple[float, str], ...]:
     while i < len(lines):
         m = _VTT_TIMED_RE.match(lines[i])
         if m:
-            h, mn, s, ms = (
-                int(m.group(1)),
-                int(m.group(2)),
-                int(m.group(3)),
-                int(m.group(4)),
-            )
+            h, mn, s = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            ms = int(m.group(4).ljust(3, "0")[:3])
             start = h * 3600 + mn * 60 + s + ms / 1000.0
             i += 1
             cue_lines: list[str] = []
