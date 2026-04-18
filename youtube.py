@@ -102,6 +102,21 @@ def _default_download(url: str, opts: dict[str, Any]) -> str:
 _SUBTITLE_LANGS = ("ru", "en")
 
 
+def _fetch_subtitle_content(entry: dict[str, Any]) -> str:
+    """Return subtitle text from *entry*, fetching from URL if needed."""
+    raw = entry.get("data") or ""
+    if raw:
+        return raw
+    sub_url = entry.get("url") or ""
+    if not sub_url:
+        return ""
+    import httpx  # lazy
+
+    resp = httpx.get(sub_url, timeout=30.0)
+    resp.raise_for_status()
+    return resp.text
+
+
 def fetch_subtitles(
     url: str,
     *,
@@ -128,14 +143,14 @@ def fetch_subtitles(
             # Prefer the "vtt" or "srv1" format, fall back to the first entry.
             for entry in entries:
                 if entry.get("ext") in ("vtt", "srv1", "srt"):
-                    raw = entry.get("data") or ""
+                    raw = _fetch_subtitle_content(entry)
                     if raw:
                         return SubtitleResult(
                             text=parse_subtitle_text(raw),
                             language=lang,
                         )
-            # Fallback: first entry with data
-            raw = entries[0].get("data") or ""
+            # Fallback: first entry with any content
+            raw = _fetch_subtitle_content(entries[0])
             if raw:
                 return SubtitleResult(
                     text=parse_subtitle_text(raw),

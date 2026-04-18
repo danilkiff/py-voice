@@ -12,6 +12,7 @@ from youtube import (
     _SUBTITLE_LANGS,
     INVALID_URL_MESSAGE,
     SubtitleResult,
+    _fetch_subtitle_content,
     download_audio,
     fetch_subtitles,
     parse_subtitle_text,
@@ -147,6 +148,38 @@ class TestParseSubtitleText:
         assert result == "Привет, это тест. Вторая строка субтитров."
 
 
+# ---------- _fetch_subtitle_content ----------
+
+
+class TestFetchSubtitleContent:
+    def test_returns_data_field_when_present(self):
+        assert _fetch_subtitle_content({"data": "hello"}) == "hello"
+
+    def test_returns_empty_when_no_data_and_no_url(self):
+        assert _fetch_subtitle_content({}) == ""
+        assert _fetch_subtitle_content({"data": "", "url": ""}) == ""
+
+    def test_fetches_from_url_when_no_data(self, monkeypatch):
+        """When data is absent but url is present, fetch via httpx."""
+        import youtube
+
+        class FakeResp:
+            text = "00:00:00.000 --> 00:00:01.000\nfetched"
+
+            def raise_for_status(self):
+                pass
+
+        def fake_get(url, **kwargs):
+            assert url == "https://example.com/subs.vtt"
+            return FakeResp()
+
+        import httpx
+
+        monkeypatch.setattr(httpx, "get", fake_get)
+        result = _fetch_subtitle_content({"url": "https://example.com/subs.vtt"})
+        assert result == "00:00:00.000 --> 00:00:01.000\nfetched"
+
+
 # ---------- fetch_subtitles ----------
 
 
@@ -206,10 +239,10 @@ class TestFetchSubtitles:
         result = fetch_subtitles("https://youtu.be/abc12345678", extract_info=spy)
         assert result is None
 
-    def test_returns_none_for_empty_data(self):
+    def test_returns_none_for_empty_data_and_no_url(self):
         spy = SpyExtractInfo(
             result={
-                "subtitles": {"ru": [{"ext": "vtt", "data": ""}]},
+                "subtitles": {"ru": [{"ext": "vtt", "data": "", "url": ""}]},
             }
         )
         result = fetch_subtitles("https://youtu.be/abc12345678", extract_info=spy)

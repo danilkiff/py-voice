@@ -8,6 +8,8 @@ from map_reduce import (
     DEFAULT_CHUNK_SIZE,
     DEFAULT_OVERLAP,
     MAP_REDUCE_THRESHOLD,
+    MAX_REDUCE_DEPTH,
+    MAX_REDUCE_INPUT,
     chunk_text,
     map_reduce_summarize,
 )
@@ -104,7 +106,6 @@ class TestMapReduceSummarize:
             return f"summary-{counter['n']}"
 
         text = "Слово. " * 200  # ~1400 chars
-        result = counting_fn.__name__  # just to use the var
         result = map_reduce_summarize(
             text, counting_fn, chunk_size=200, overlap=20, threshold=300
         )
@@ -137,3 +138,98 @@ class TestMapReduceSummarize:
         map_reduce_summarize(text, spy)
         # Should have used map-reduce (more than 1 call)
         assert len(spy.calls) > 1
+
+
+# ---------- recursive reduce ----------
+
+
+class TestRecursiveReduce:
+    def test_recursive_reduce_when_summaries_exceed_max(self):
+        """When map summaries combined > max_reduce_input, reduce recurses."""
+        calls: list[str] = []
+
+        def shrinking_fn(text: str) -> str:
+            calls.append(text)
+            # Return a summary that is shorter than input but still sizable
+            # enough that the first reduce pass exceeds max_reduce_input.
+            return text[:80] + "..."
+
+        # ~2100 chars, chunks of ~200 → ~10 chunks
+        # Each summary ~83 chars → combined ~830+separators ≈ ~850
+        # Set max_reduce_input=400 to force at least one recursion level,
+        # but summaries shrink so it converges.
+        text = "Предложение. " * 150
+        map_reduce_summarize(
+            text,
+            shrinking_fn,
+            chunk_size=200,
+            overlap=20,
+            threshold=300,
+            max_reduce_input=400,
+        )
+        map_chunks = chunk_text(text, chunk_size=200, overlap=20)
+        # More calls than a single map+reduce pass (recursion happened)
+        assert len(calls) > len(map_chunks) + 1
+
+    def test_single_reduce_when_summaries_fit(self):
+        """When map summaries combined <= max_reduce_input, no recursion."""
+        spy = SpySummarize(result="short")
+        text = "Предложение. " * 50  # ~700 chars
+        map_reduce_summarize(
+            text,
+            spy,
+            chunk_size=200,
+            overlap=20,
+            threshold=300,
+            max_reduce_input=99999,
+        )
+        map_chunks = chunk_text(text, chunk_size=200, overlap=20)
+        # Exactly N map calls + 1 reduce
+        assert len(spy.calls) == len(map_chunks) + 1
+
+    def test_depth_is_capped(self):
+        """Even if summaries never shrink, recursion stops at MAX_REDUCE_DEPTH."""
+        calls: list[str] = []
+
+        def inflating_fn(text: str) -> str:
+            calls.append(text)
+            # Always return something big — would infinite-loop without cap
+            return "x" * 5000
+
+        text = "Предложение. " * 150
+        # This would recurse forever without the depth cap
+        map_reduce_summarize(
+            text,
+            inflating_fn,
+            chunk_size=200,
+            overlap=20,
+            threshold=300,
+            max_reduce_input=100,
+        )
+        # Should terminate; just verify it didn't hang
+        assert len(calls) > 0
+        assert MAX_REDUCE_DEPTH == 3
+
+
+# ---------- env var configuration ----------
+
+
+class TestEnvVarDefaults:
+    def test_default_chunk_size(self):
+        assert DEFAULT_CHUNK_SIZE == 3000
+
+    def test_default_overlap(self):
+        assert DEFAULT_OVERLAP == 200
+
+    def test_default_threshold(self):
+        assert MAP_REDUCE_THRESHOLD == 4000
+
+    def test_default_max_reduce_input(self):
+        assert MAX_REDUCE_INPUT == 20000
+
+    def test_env_overrides_are_documented(self):
+        """The env var names are used at module level — just verify the
+        constants are int (parsed from os.environ.get)."""
+        assert isinstance(DEFAULT_CHUNK_SIZE, int)
+        assert isinstance(MAP_REDUCE_THRESHOLD, int)
+        assert isinstance(MAX_REDUCE_INPUT, int)
