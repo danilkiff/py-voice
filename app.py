@@ -41,23 +41,75 @@ def _default_summarize(text: str) -> str:
     return Summarizer(cfg.base_url, cfg.model).summarize(text)
 
 
+def _format_timecode(seconds: float) -> str:
+    """Format seconds as H:MM:SS or M:SS."""
+    total = int(seconds)
+    h, remainder = divmod(total, 3600)
+    m, s = divmod(remainder, 60)
+    if h:
+        return f"{h}:{m:02d}:{s:02d}"
+    return f"{m}:{s:02d}"
+
+
+def _build_thumbnail_html(storyboard: object, seconds: float) -> str:
+    """Return an <img> tag with CSS cropping for a storyboard sprite."""
+    from youtube import StoryboardInfo, thumbnail_url_for_time
+
+    if not isinstance(storyboard, StoryboardInfo):
+        return ""
+    sprite_url, x, y = thumbnail_url_for_time(storyboard, seconds)
+    w, h = storyboard.width, storyboard.height
+    return (
+        f'<img src="{sprite_url}" '
+        f'style="object-fit:none;object-position:-{x}px -{y}px;'
+        f'width:{w}px;height:{h}px;">'
+    )
+
+
+def _group_timed_segments(
+    segments: tuple[tuple[float, str], ...],
+    chunk_size: int,
+) -> list[tuple[float, str]]:
+    """Group (time, text) segments by cumulative character length."""
+    if not segments:
+        return []
+    groups: list[tuple[float, str]] = []
+    current_time = segments[0][0]
+    current_parts: list[str] = []
+    current_len = 0
+    for start, text in segments:
+        if current_len + len(text) > chunk_size and current_parts:
+            groups.append((current_time, " ".join(current_parts)))
+            current_time = start
+            current_parts = []
+            current_len = 0
+        current_parts.append(text)
+        current_len += len(text)
+    if current_parts:  # pragma: no branch — always true when segments non-empty
+        groups.append((current_time, " ".join(current_parts)))
+    return groups
+
+
 def _default_youtube_summarize(url: str) -> Iterator[str]:
     from map_reduce import (
+        DEFAULT_CHUNK_SIZE,
         MAP_REDUCE_THRESHOLD,
         chunk_text,
         map_reduce_summarize,
     )
-    from youtube import download_audio, fetch_subtitles, validate_youtube_url
+    from youtube import download_audio, fetch_video_info, validate_youtube_url
 
     validate_youtube_url(url)
     cfg = load_config()
     summarizer = Summarizer(cfg.base_url, cfg.model)
 
-    # Fast path: try subtitles first
     yield "Получение субтитров…"
-    sub_result = fetch_subtitles(url)
-    if sub_result is not None:
-        text = sub_result.text
+    video_info = fetch_video_info(url)
+
+    if video_info.subtitles is not None:
+        text = video_info.subtitles.text
+        segments = video_info.subtitles.segments
+        storyboard = video_info.storyboard
     else:
         # Slow path: download audio, transcribe
         yield "Субтитры не найдены. Загрузка аудио…"
@@ -65,6 +117,8 @@ def _default_youtube_summarize(url: str) -> Iterator[str]:
         yield "Транскрибация аудио…"
         transcription = get_transcriber().transcribe(str(audio_path))
         text = transcription.text
+        segments = ()
+        storyboard = video_info.storyboard
 
     # Short text — single call, no streaming needed
     if len(text) <= MAP_REDUCE_THRESHOLD:
@@ -72,18 +126,41 @@ def _default_youtube_summarize(url: str) -> Iterator[str]:
         yield summarizer.summarize(text)
         return
 
-    # Map phase: yield each chunk summary progressively
+    # Timed path: chunk by segments with timecodes + thumbnails
+    if segments:
+        timed_chunks = _group_timed_segments(segments, DEFAULT_CHUNK_SIZE)
+        output = ""
+        summaries: list[str] = []
+        for i, (start_time, chunk) in enumerate(timed_chunks):
+            summary = summarizer.summarize(chunk)
+            summaries.append(summary)
+            timecode = _format_timecode(start_time)
+            thumb = _build_thumbnail_html(storyboard, start_time) if storyboard else ""
+            output += (
+                f"**[{timecode}]** {summary}\n\n{thumb}\n\n"
+                if thumb
+                else f"**[{timecode}]** {summary}\n\n"
+            )
+            yield output
+
+        combined = "\n\n".join(summaries)
+        output += "---\n\n*Формирование итога…*\n"
+        yield output
+        final = map_reduce_summarize(combined, summarizer.summarize)
+        yield final
+        return
+
+    # Untimed fallback: use chunk_text as before
     chunks = chunk_text(text)
     output = ""
-    summaries: list[str] = []
+    summaries_plain: list[str] = []
     for i, chunk in enumerate(chunks):
         summary = summarizer.summarize(chunk)
-        summaries.append(summary)
+        summaries_plain.append(summary)
         output += f"**[{i + 1}/{len(chunks)}]** {summary}\n\n"
         yield output
 
-    # Reduce phase
-    combined = "\n\n".join(summaries)
+    combined = "\n\n".join(summaries_plain)
     output += "---\n\n*Формирование итога…*\n"
     yield output
     final = map_reduce_summarize(combined, summarizer.summarize)

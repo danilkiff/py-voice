@@ -10,11 +10,17 @@ import pytest
 from youtube import (
     _SUBTITLE_LANGS,
     INVALID_URL_MESSAGE,
+    StoryboardInfo,
     SubtitleResult,
+    VideoInfo,
     _fetch_subtitle_content,
     download_audio,
+    extract_storyboard,
     fetch_subtitles,
+    fetch_video_info,
     parse_subtitle_text,
+    parse_subtitle_timed,
+    thumbnail_url_for_time,
     validate_youtube_url,
 )
 
@@ -386,3 +392,218 @@ class TestDownloadAudio:
         import youtube
 
         assert youtube._default_download is not None
+
+
+# ---------- parse_subtitle_timed ----------
+
+
+class TestParseSubtitleTimed:
+    def test_vtt_returns_timed_segments(self):
+        segments = parse_subtitle_timed(_SAMPLE_VTT)
+        assert len(segments) == 2
+        assert segments[0] == (0.0, "Привет, это тест.")
+        assert segments[1] == (3.5, "Вторая строка субтитров.")
+
+    def test_srt_returns_timed_segments(self):
+        segments = parse_subtitle_timed(_SAMPLE_SRT)
+        assert len(segments) == 2
+        assert segments[0] == (0.0, "Привет, это тест.")
+        assert segments[1] == (3.5, "Вторая строка субтитров.")
+
+    def test_strips_html_tags(self):
+        raw = "00:00:01.000 --> 00:00:02.000\n<c>tagged</c> text"
+        segments = parse_subtitle_timed(raw)
+        assert len(segments) == 1
+        assert segments[0] == (1.0, "tagged text")
+
+    def test_empty_input(self):
+        assert parse_subtitle_timed("") == ()
+
+    def test_multi_line_cue(self):
+        raw = "00:01:30.500 --> 00:01:35.000\nLine one\nLine two"
+        segments = parse_subtitle_timed(raw)
+        assert len(segments) == 1
+        assert segments[0] == (90.5, "Line one Line two")
+
+    def test_strips_webvtt_header(self):
+        segments = parse_subtitle_timed(_SAMPLE_VTT)
+        assert all("WEBVTT" not in text for _, text in segments)
+
+    def test_hour_timestamp(self):
+        raw = "01:30:00.000 --> 01:30:05.000\ntext"
+        segments = parse_subtitle_timed(raw)
+        assert segments[0][0] == 5400.0
+
+    def test_skips_empty_cue_after_tag_strip(self):
+        raw = "00:00:01.000 --> 00:00:02.000\n<c></c>"
+        segments = parse_subtitle_timed(raw)
+        assert segments == ()
+
+    def test_skips_tag_only_lines_but_keeps_text(self):
+        raw = "00:00:01.000 --> 00:00:02.000\n<c></c>\nreal text"
+        segments = parse_subtitle_timed(raw)
+        assert len(segments) == 1
+        assert segments[0] == (1.0, "real text")
+
+
+# ---------- extract_storyboard ----------
+
+_SAMPLE_STORYBOARD_FORMAT = {
+    "format_id": "sb0",
+    "format_note": "storyboard",
+    "width": 160,
+    "height": 90,
+    "rows": 10,
+    "columns": 10,
+    "fps": 0.5,
+    "fragments": [
+        {"url": "https://i.ytimg.com/sb/M0.jpg", "duration": 200.0},
+        {"url": "https://i.ytimg.com/sb/M1.jpg", "duration": 200.0},
+    ],
+}
+
+
+class TestExtractStoryboard:
+    def test_returns_storyboard_info(self):
+        info = {"formats": [_SAMPLE_STORYBOARD_FORMAT]}
+        sb = extract_storyboard(info)
+        assert sb is not None
+        assert sb.width == 160
+        assert sb.height == 90
+        assert sb.rows == 10
+        assert sb.columns == 10
+        assert sb.fps == 0.5
+        assert len(sb.fragments) == 2
+
+    def test_returns_none_when_no_formats(self):
+        assert extract_storyboard({}) is None
+
+    def test_returns_none_when_no_storyboard(self):
+        info = {"formats": [{"format_note": "video", "width": 1920}]}
+        assert extract_storyboard(info) is None
+
+    def test_picks_highest_resolution(self):
+        low = {**_SAMPLE_STORYBOARD_FORMAT, "width": 80, "height": 45}
+        high = {**_SAMPLE_STORYBOARD_FORMAT, "width": 320, "height": 180}
+        sb = extract_storyboard({"formats": [low, high]})
+        assert sb is not None
+        assert sb.width == 320
+
+    def test_skips_lower_resolution(self):
+        high = {**_SAMPLE_STORYBOARD_FORMAT, "width": 320, "height": 180}
+        low = {**_SAMPLE_STORYBOARD_FORMAT, "width": 80, "height": 45}
+        sb = extract_storyboard({"formats": [high, low]})
+        assert sb is not None
+        assert sb.width == 320
+
+    def test_returns_none_when_no_fragments(self):
+        fmt = {**_SAMPLE_STORYBOARD_FORMAT, "fragments": []}
+        assert extract_storyboard({"formats": [fmt]}) is None
+
+
+# ---------- thumbnail_url_for_time ----------
+
+
+class TestThumbnailUrlForTime:
+    def _make_sb(self, fps=0.5, rows=10, columns=10):
+        return StoryboardInfo(
+            fragments=(
+                ("https://cdn/M0.jpg", 200.0),
+                ("https://cdn/M1.jpg", 200.0),
+            ),
+            width=160,
+            height=90,
+            rows=rows,
+            columns=columns,
+            fps=fps,
+        )
+
+    def test_first_thumbnail(self):
+        url, x, y = thumbnail_url_for_time(self._make_sb(), 0.0)
+        assert url == "https://cdn/M0.jpg"
+        assert x == 0
+        assert y == 0
+
+    def test_mid_sprite(self):
+        # t=22s, fps=0.5 → thumb_idx=11, col=1, row=1
+        url, x, y = thumbnail_url_for_time(self._make_sb(), 22.0)
+        assert url == "https://cdn/M0.jpg"
+        assert x == 160  # col=1
+        assert y == 90  # row=1
+
+    def test_second_fragment(self):
+        # t=210, first fragment covers 200s → in second fragment
+        url, x, y = thumbnail_url_for_time(self._make_sb(), 210.0)
+        assert url == "https://cdn/M1.jpg"
+
+    def test_beyond_duration_clamps(self):
+        # t=9999 → clamps to last fragment
+        url, x, y = thumbnail_url_for_time(self._make_sb(), 9999.0)
+        assert url == "https://cdn/M1.jpg"
+
+    def test_fps_zero_returns_first(self):
+        sb = self._make_sb(fps=0.0)
+        url, x, y = thumbnail_url_for_time(sb, 100.0)
+        assert url == "https://cdn/M0.jpg"
+        assert x == 0
+        assert y == 0
+
+
+# ---------- fetch_video_info ----------
+
+
+class TestFetchVideoInfo:
+    def test_returns_subtitles_and_storyboard(self):
+        spy = SpyExtractInfo(
+            result={
+                "subtitles": {
+                    "ru": [
+                        {"ext": "vtt", "data": _SAMPLE_VTT},
+                    ],
+                },
+                "formats": [_SAMPLE_STORYBOARD_FORMAT],
+            }
+        )
+        info = fetch_video_info("https://youtu.be/abc12345678", extract_info=spy)
+        assert isinstance(info, VideoInfo)
+        assert info.subtitles is not None
+        assert info.subtitles.language == "ru"
+        assert len(info.subtitles.segments) == 2
+        assert info.subtitles.segments[0][0] == 0.0
+        assert info.storyboard is not None
+        assert info.storyboard.width == 160
+
+    def test_subtitles_only(self):
+        spy = SpyExtractInfo(
+            result={
+                "subtitles": {
+                    "ru": [{"ext": "vtt", "data": _SAMPLE_VTT}],
+                },
+            }
+        )
+        info = fetch_video_info("https://youtu.be/abc12345678", extract_info=spy)
+        assert info.subtitles is not None
+        assert info.storyboard is None
+
+    def test_storyboard_only(self):
+        spy = SpyExtractInfo(
+            result={
+                "subtitles": {},
+                "automatic_captions": {},
+                "formats": [_SAMPLE_STORYBOARD_FORMAT],
+            }
+        )
+        info = fetch_video_info("https://youtu.be/abc12345678", extract_info=spy)
+        assert info.subtitles is None
+        assert info.storyboard is not None
+
+    def test_neither(self):
+        spy = SpyExtractInfo(result={})
+        info = fetch_video_info("https://youtu.be/abc12345678", extract_info=spy)
+        assert info.subtitles is None
+        assert info.storyboard is None
+
+    def test_extract_info_called_once(self):
+        spy = SpyExtractInfo(result={})
+        fetch_video_info("https://youtu.be/abc12345678", extract_info=spy)
+        assert len(spy.calls) == 1

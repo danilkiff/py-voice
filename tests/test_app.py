@@ -13,6 +13,9 @@ from app import (
     MODEL_CHOICES,
     OLLAMA_UNAVAILABLE,
     YOUTUBE_ERROR,
+    _build_thumbnail_html,
+    _format_timecode,
+    _group_timed_segments,
     build_app,
     format_header,
     make_run_handler,
@@ -207,6 +210,80 @@ class TestDefaultSummarize:
         assert calls == [("http://h:1", "m", "input")]
 
 
+# ---------- _format_timecode ----------
+
+
+class TestFormatTimecode:
+    def test_zero(self):
+        assert _format_timecode(0.0) == "0:00"
+
+    def test_seconds_only(self):
+        assert _format_timecode(5.0) == "0:05"
+
+    def test_minutes_and_seconds(self):
+        assert _format_timecode(65.0) == "1:05"
+
+    def test_hours(self):
+        assert _format_timecode(3661.0) == "1:01:01"
+
+    def test_fractional_truncated(self):
+        assert _format_timecode(90.9) == "1:30"
+
+
+# ---------- _build_thumbnail_html ----------
+
+
+class TestBuildThumbnailHtml:
+    def test_returns_img_tag(self):
+        from youtube import StoryboardInfo
+
+        sb = StoryboardInfo(
+            fragments=(("https://cdn/M0.jpg", 200.0),),
+            width=160,
+            height=90,
+            rows=10,
+            columns=10,
+            fps=0.5,
+        )
+        html = _build_thumbnail_html(sb, 0.0)
+        assert "<img" in html
+        assert "https://cdn/M0.jpg" in html
+        assert "object-fit:none" in html
+
+    def test_returns_empty_for_non_storyboard(self):
+        assert _build_thumbnail_html(None, 0.0) == ""
+        assert _build_thumbnail_html("not a storyboard", 0.0) == ""
+
+
+# ---------- _group_timed_segments ----------
+
+
+class TestGroupTimedSegments:
+    def test_single_group(self):
+        segs = ((0.0, "short"), (1.0, "text"))
+        groups = _group_timed_segments(segs, chunk_size=100)
+        assert len(groups) == 1
+        assert groups[0][0] == 0.0
+        assert "short" in groups[0][1]
+        assert "text" in groups[0][1]
+
+    def test_multiple_groups(self):
+        segs = ((0.0, "a" * 50), (10.0, "b" * 50), (20.0, "c" * 50))
+        groups = _group_timed_segments(segs, chunk_size=60)
+        assert len(groups) == 3
+        assert groups[0][0] == 0.0
+        assert groups[1][0] == 10.0
+        assert groups[2][0] == 20.0
+
+    def test_empty_segments(self):
+        assert _group_timed_segments((), chunk_size=100) == []
+
+    def test_timestamps_from_first_segment_in_group(self):
+        segs = ((5.0, "a" * 10), (15.0, "b" * 10), (25.0, "c" * 10))
+        groups = _group_timed_segments(segs, chunk_size=30)
+        assert groups[0][0] == 5.0
+
+
 # ---------- _default_youtube_summarize ----------
 
 
@@ -226,11 +303,14 @@ class TestDefaultYoutubeSummarize:
 
         monkeypatch.setattr(app, "Summarizer", FakeSummarizer)
 
-        from youtube import SubtitleResult
+        from youtube import SubtitleResult, VideoInfo
 
         monkeypatch.setattr(
-            "youtube.fetch_subtitles",
-            lambda url, **kw: SubtitleResult(text="short", language="ru"),
+            "youtube.fetch_video_info",
+            lambda url, **kw: VideoInfo(
+                subtitles=SubtitleResult(text="short", language="ru"),
+                storyboard=None,
+            ),
         )
         monkeypatch.setattr("youtube.validate_youtube_url", lambda u: u)
 
@@ -239,8 +319,8 @@ class TestDefaultYoutubeSummarize:
         assert "Получение субтитров…" in results
         assert "Суммаризация…" in results
 
-    def test_long_text_streams_map_then_reduce(self, monkeypatch):
-        """Long text → multiple map yields + reduce yield."""
+    def test_long_text_with_timed_segments(self, monkeypatch):
+        """Long text with segments → timed map yields with timecodes."""
         from config import OllamaConfig
 
         monkeypatch.setattr(app, "load_config", lambda: OllamaConfig("h", 1, "m"))
@@ -254,23 +334,97 @@ class TestDefaultYoutubeSummarize:
 
         monkeypatch.setattr(app, "Summarizer", FakeSummarizer)
 
-        from youtube import SubtitleResult
+        from youtube import SubtitleResult, VideoInfo
 
-        # Text longer than MAP_REDUCE_THRESHOLD (4000)
-        long_text = "Слово. " * 1000
+        # Build timed segments exceeding MAP_REDUCE_THRESHOLD (4000 chars)
+        segs = tuple((i * 10.0, "Слово. " * 100) for i in range(10))
+        long_text = " ".join(t for _, t in segs)
         monkeypatch.setattr(
-            "youtube.fetch_subtitles",
-            lambda url, **kw: SubtitleResult(text=long_text, language="ru"),
+            "youtube.fetch_video_info",
+            lambda url, **kw: VideoInfo(
+                subtitles=SubtitleResult(text=long_text, language="ru", segments=segs),
+                storyboard=None,
+            ),
         )
         monkeypatch.setattr("youtube.validate_youtube_url", lambda u: u)
 
         results = list(app._default_youtube_summarize("https://youtu.be/x"))
-        # At least: progress + N map yields + 1 "reducing..." yield + 1 final
         assert len(results) >= 4
-        # Intermediate yields contain map progress markers
-        assert any("**[1/" in r for r in results)
-        # Last yield is the final reduce result
+        # Timecodes in output
+        assert any("**[0:00]**" in r for r in results)
         assert results[-1] == "s"
+
+    def test_long_text_untimed_fallback(self, monkeypatch):
+        """Long text without segments → untimed chunk markers."""
+        from config import OllamaConfig
+
+        monkeypatch.setattr(app, "load_config", lambda: OllamaConfig("h", 1, "m"))
+
+        class FakeSummarizer:
+            def __init__(self, *a):
+                pass
+
+            def summarize(self, text):
+                return "s"
+
+        monkeypatch.setattr(app, "Summarizer", FakeSummarizer)
+
+        from youtube import SubtitleResult, VideoInfo
+
+        long_text = "Слово. " * 1000
+        monkeypatch.setattr(
+            "youtube.fetch_video_info",
+            lambda url, **kw: VideoInfo(
+                subtitles=SubtitleResult(text=long_text, language="ru"),
+                storyboard=None,
+            ),
+        )
+        monkeypatch.setattr("youtube.validate_youtube_url", lambda u: u)
+
+        results = list(app._default_youtube_summarize("https://youtu.be/x"))
+        assert len(results) >= 4
+        assert any("**[1/" in r for r in results)
+        assert results[-1] == "s"
+
+    def test_timed_with_storyboard_includes_thumbnail(self, monkeypatch):
+        """Timed segments + storyboard → thumbnail HTML in output."""
+        from config import OllamaConfig
+
+        monkeypatch.setattr(app, "load_config", lambda: OllamaConfig("h", 1, "m"))
+
+        class FakeSummarizer:
+            def __init__(self, *a):
+                pass
+
+            def summarize(self, text):
+                return "s"
+
+        monkeypatch.setattr(app, "Summarizer", FakeSummarizer)
+
+        from youtube import StoryboardInfo, SubtitleResult, VideoInfo
+
+        segs = tuple((i * 10.0, "Слово. " * 100) for i in range(10))
+        long_text = " ".join(t for _, t in segs)
+        sb = StoryboardInfo(
+            fragments=(("https://cdn/M0.jpg", 200.0),),
+            width=160,
+            height=90,
+            rows=10,
+            columns=10,
+            fps=0.5,
+        )
+        monkeypatch.setattr(
+            "youtube.fetch_video_info",
+            lambda url, **kw: VideoInfo(
+                subtitles=SubtitleResult(text=long_text, language="ru", segments=segs),
+                storyboard=sb,
+            ),
+        )
+        monkeypatch.setattr("youtube.validate_youtube_url", lambda u: u)
+
+        results = list(app._default_youtube_summarize("https://youtu.be/x"))
+        assert any("<img" in r for r in results)
+        assert any("https://cdn/M0.jpg" in r for r in results)
 
     def test_fallback_to_audio_when_no_subtitles(self, monkeypatch):
         """When subtitles unavailable, downloads audio and transcribes."""
@@ -287,7 +441,12 @@ class TestDefaultYoutubeSummarize:
 
         monkeypatch.setattr(app, "Summarizer", FakeSummarizer)
         monkeypatch.setattr("youtube.validate_youtube_url", lambda u: u)
-        monkeypatch.setattr("youtube.fetch_subtitles", lambda url, **kw: None)
+        monkeypatch.setattr(
+            "youtube.fetch_video_info",
+            lambda url, **kw: __import__("youtube").VideoInfo(
+                subtitles=None, storyboard=None
+            ),
+        )
         monkeypatch.setattr(
             "youtube.download_audio", lambda url, **kw: "/tmp/audio.wav"
         )
