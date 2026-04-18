@@ -219,63 +219,93 @@ class TestMakeSummarizeHandler:
 # ---------- make_youtube_handler ----------
 
 
-def _fake_youtube_summarize(url: str) -> str:
-    return f"yt-summary-of:{url}"
+def _fake_youtube_summarize(url: str):
+    yield f"yt-summary-of:{url}"
+
+
+def _last(gen):
+    """Consume a generator and return its last yielded value."""
+    value = None
+    for value in gen:
+        pass
+    return value
 
 
 class TestMakeYoutubeHandler:
     def test_empty_string_returns_empty_url_message(self):
         handler = make_youtube_handler(youtube_summarize_fn=_fake_youtube_summarize)
-        assert handler("") == EMPTY_URL_MESSAGE
+        assert _last(handler("")) == EMPTY_URL_MESSAGE
 
     def test_whitespace_only_returns_empty_url_message(self):
         handler = make_youtube_handler(youtube_summarize_fn=_fake_youtube_summarize)
-        assert handler("   ") == EMPTY_URL_MESSAGE
+        assert _last(handler("   ")) == EMPTY_URL_MESSAGE
 
     def test_valid_url_returns_summary(self):
         handler = make_youtube_handler(youtube_summarize_fn=_fake_youtube_summarize)
-        assert handler("https://youtu.be/abc") == "yt-summary-of:https://youtu.be/abc"
+        assert (
+            _last(handler("https://youtu.be/abc"))
+            == "yt-summary-of:https://youtu.be/abc"
+        )
 
     def test_strips_url_whitespace(self):
         handler = make_youtube_handler(youtube_summarize_fn=_fake_youtube_summarize)
         assert (
-            handler("  https://youtu.be/abc  ") == "yt-summary-of:https://youtu.be/abc"
+            _last(handler("  https://youtu.be/abc  "))
+            == "yt-summary-of:https://youtu.be/abc"
         )
 
     def test_value_error_returns_message(self):
-        def raises_value(url: str) -> str:
+        def raises_value(url: str):
             raise ValueError("Некорректная ссылка на YouTube.")
+            yield  # noqa: RET503 — makes this a generator
 
         handler = make_youtube_handler(youtube_summarize_fn=raises_value)
-        assert handler("bad") == "Некорректная ссылка на YouTube."
+        assert _last(handler("bad")) == "Некорректная ссылка на YouTube."
 
     def test_generic_exception_returns_youtube_error(self):
-        def boom(url: str) -> str:
+        def boom(url: str):
             raise RuntimeError("network failure")
+            yield  # noqa: RET503 — makes this a generator
 
         handler = make_youtube_handler(youtube_summarize_fn=boom)
-        assert handler("https://youtu.be/abc") == YOUTUBE_ERROR
+        assert _last(handler("https://youtu.be/abc")) == YOUTUBE_ERROR
 
     def test_fn_receives_stripped_url(self):
         seen: list[str] = []
 
-        def spy(url: str) -> str:
+        def spy(url: str):
             seen.append(url)
-            return "ok"
+            yield "ok"
 
-        make_youtube_handler(youtube_summarize_fn=spy)("  url  ")
+        _last(make_youtube_handler(youtube_summarize_fn=spy)("  url  "))
         assert seen == ["url"]
+
+    def test_handler_is_generator(self):
+        handler = make_youtube_handler(youtube_summarize_fn=_fake_youtube_summarize)
+        import types
+
+        assert isinstance(handler("x"), types.GeneratorType)
+
+    def test_multiple_yields_from_fn(self):
+        def multi(url: str):
+            yield "step-1"
+            yield "step-2"
+            yield "final"
+
+        handler = make_youtube_handler(youtube_summarize_fn=multi)
+        results = list(handler("url"))
+        assert results == ["step-1", "step-2", "final"]
 
     def test_default_fn_used_when_not_injected(self, monkeypatch):
         called = {}
 
-        def fake_default(url: str) -> str:
+        def fake_default(url: str):
             called["url"] = url
-            return "результат"
+            yield "результат"
 
         monkeypatch.setattr(app, "_default_youtube_summarize", fake_default)
         handler = app.make_youtube_handler()
-        result = handler("https://youtu.be/abc")
+        result = _last(handler("https://youtu.be/abc"))
         assert result == "результат"
         assert called["url"] == "https://youtu.be/abc"
 

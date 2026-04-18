@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterator
 
 import gradio as gr
 
@@ -29,7 +29,7 @@ YOUTUBE_ERROR = "Не удалось обработать видео. Прове
 
 TranscribeFn = Callable[[str, str], TranscriptionResult]
 SummarizeFn = Callable[[str], str]
-YouTubeSummarizeFn = Callable[[str], str]
+YouTubeSummarizeFn = Callable[[str], Iterator[str]]
 
 
 def _default_transcribe(audio_path: str, model_size: str) -> TranscriptionResult:
@@ -41,8 +41,12 @@ def _default_summarize(text: str) -> str:
     return Summarizer(cfg.base_url, cfg.model).summarize(text)
 
 
-def _default_youtube_summarize(url: str) -> str:
-    from map_reduce import map_reduce_summarize
+def _default_youtube_summarize(url: str) -> Iterator[str]:
+    from map_reduce import (
+        MAP_REDUCE_THRESHOLD,
+        chunk_text,
+        map_reduce_summarize,
+    )
     from youtube import download_audio, fetch_subtitles, validate_youtube_url
 
     validate_youtube_url(url)
@@ -52,12 +56,34 @@ def _default_youtube_summarize(url: str) -> str:
     # Fast path: try subtitles first
     sub_result = fetch_subtitles(url)
     if sub_result is not None:
-        return map_reduce_summarize(sub_result.text, summarizer.summarize)
+        text = sub_result.text
+    else:
+        # Slow path: download audio, transcribe
+        audio_path = download_audio(url)
+        transcription = get_transcriber().transcribe(str(audio_path))
+        text = transcription.text
 
-    # Slow path: download audio, transcribe, then summarize
-    audio_path = download_audio(url)
-    transcription = get_transcriber().transcribe(str(audio_path))
-    return map_reduce_summarize(transcription.text, summarizer.summarize)
+    # Short text — single call, no streaming needed
+    if len(text) <= MAP_REDUCE_THRESHOLD:
+        yield summarizer.summarize(text)
+        return
+
+    # Map phase: yield each chunk summary progressively
+    chunks = chunk_text(text)
+    output = ""
+    summaries: list[str] = []
+    for i, chunk in enumerate(chunks):
+        summary = summarizer.summarize(chunk)
+        summaries.append(summary)
+        output += f"**[{i + 1}/{len(chunks)}]** {summary}\n\n"
+        yield output
+
+    # Reduce phase
+    combined = "\n\n".join(summaries)
+    output += "---\n\n*Формирование итога…*\n"
+    yield output
+    final = map_reduce_summarize(combined, summarizer.summarize)
+    yield final
 
 
 def format_header(result: TranscriptionResult, model_size: str) -> str:
@@ -118,23 +144,29 @@ def make_summarize_handler(
 
 def make_youtube_handler(
     youtube_summarize_fn: YouTubeSummarizeFn | None = None,
-) -> Callable[[str], str]:
-    """Build a Gradio click handler for YouTube summarization."""
+) -> Callable[[str], Iterator[str]]:
+    """Build a Gradio streaming handler for YouTube summarization.
+
+    The returned function is a generator — Gradio updates the output
+    textbox after each ``yield``, giving the user progressive feedback
+    during the map phase.
+    """
     fn: YouTubeSummarizeFn = (
         youtube_summarize_fn
         if youtube_summarize_fn is not None
         else _default_youtube_summarize
     )
 
-    def handle_youtube(url: str) -> str:
+    def handle_youtube(url: str) -> Iterator[str]:
         if not url or not url.strip():
-            return EMPTY_URL_MESSAGE
+            yield EMPTY_URL_MESSAGE
+            return
         try:
-            return fn(url.strip())
+            yield from fn(url.strip())
         except ValueError as exc:
-            return str(exc)
+            yield str(exc)
         except Exception:
-            return YOUTUBE_ERROR
+            yield YOUTUBE_ERROR
 
     return handle_youtube
 
