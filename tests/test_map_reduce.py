@@ -202,17 +202,17 @@ class TestRecursiveReduce:
         def inflating_fn(text: str) -> str:
             calls.append(text)
             # Always return something big — would infinite-loop without cap
-            return "x" * 5000
+            return "x" * 200
 
-        text = "Предложение. " * 150
+        text = "Предложение. " * 10  # ~140 chars
         # This would recurse forever without the depth cap
         map_reduce_summarize(
             text,
             inflating_fn,
-            chunk_size=200,
-            overlap=20,
-            threshold=300,
-            max_reduce_input=100,
+            chunk_size=100,
+            overlap=0,
+            threshold=50,
+            max_reduce_input=50,
         )
         # Should terminate; just verify it didn't hang
         assert len(calls) > 0
