@@ -51,7 +51,7 @@ def chunk_text(
 
     chunks: list[str] = []
     start = 0
-    while start < len(text):
+    while start < len(text):  # pragma: no branch — loop always exits via break
         end = start + chunk_size
         if end >= len(text):
             chunks.append(text[start:])

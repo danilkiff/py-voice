@@ -66,6 +66,14 @@ class TestChunkText:
     def test_empty_string_returns_single_chunk(self):
         assert chunk_text("") == [""]
 
+    def test_no_sentence_boundary_cuts_at_chunk_size(self):
+        """When text has no sentence-ending chars, chunk_text hard-cuts."""
+        text = "a" * 500  # no . ! ? \n
+        chunks = chunk_text(text, chunk_size=200, overlap=20)
+        assert len(chunks) >= 2
+        # First chunk is exactly chunk_size since no sentence boundary found
+        assert len(chunks[0]) == 200
+
     def test_defaults_match_module_constants(self):
         # Ensure chunk_text uses module-level defaults
         text = "a" * (DEFAULT_CHUNK_SIZE + 1)

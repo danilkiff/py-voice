@@ -165,6 +165,127 @@ class TestDefaultTranscribe:
         assert seen == {"audio": "/x.mp3", "model_size": "small"}
 
 
+# ---------- _default_summarize ----------
+
+
+class TestDefaultSummarize:
+    def test_delegates_to_summarizer(self, monkeypatch):
+        from config import OllamaConfig
+
+        monkeypatch.setattr(app, "load_config", lambda: OllamaConfig("h", 1, "m"))
+        calls = []
+
+        class FakeSummarizer:
+            def __init__(self, base_url, model):
+                self.base_url = base_url
+                self.model = model
+
+            def summarize(self, text):
+                calls.append((self.base_url, self.model, text))
+                return "result"
+
+        monkeypatch.setattr(app, "Summarizer", FakeSummarizer)
+        result = app._default_summarize("input")
+        assert result == "result"
+        assert calls == [("http://h:1", "m", "input")]
+
+
+# ---------- _default_youtube_summarize ----------
+
+
+class TestDefaultYoutubeSummarize:
+    def test_short_text_single_summary(self, monkeypatch):
+        """Short subtitle text (< threshold) → single summarize call."""
+        from config import OllamaConfig
+
+        monkeypatch.setattr(app, "load_config", lambda: OllamaConfig("h", 1, "m"))
+
+        class FakeSummarizer:
+            def __init__(self, *a):
+                pass
+
+            def summarize(self, text):
+                return f"sum({text[:10]})"
+
+        monkeypatch.setattr(app, "Summarizer", FakeSummarizer)
+
+        from youtube import SubtitleResult
+
+        monkeypatch.setattr(
+            "youtube.fetch_subtitles",
+            lambda url, **kw: SubtitleResult(text="short", language="ru"),
+        )
+        monkeypatch.setattr("youtube.validate_youtube_url", lambda u: u)
+
+        results = list(app._default_youtube_summarize("https://youtu.be/x"))
+        assert len(results) == 1
+        assert results[0] == "sum(short)"
+
+    def test_long_text_streams_map_then_reduce(self, monkeypatch):
+        """Long text → multiple map yields + reduce yield."""
+        from config import OllamaConfig
+
+        monkeypatch.setattr(app, "load_config", lambda: OllamaConfig("h", 1, "m"))
+
+        class FakeSummarizer:
+            def __init__(self, *a):
+                pass
+
+            def summarize(self, text):
+                return "s"
+
+        monkeypatch.setattr(app, "Summarizer", FakeSummarizer)
+
+        from youtube import SubtitleResult
+
+        # Text longer than MAP_REDUCE_THRESHOLD (4000)
+        long_text = "Слово. " * 1000
+        monkeypatch.setattr(
+            "youtube.fetch_subtitles",
+            lambda url, **kw: SubtitleResult(text=long_text, language="ru"),
+        )
+        monkeypatch.setattr("youtube.validate_youtube_url", lambda u: u)
+
+        results = list(app._default_youtube_summarize("https://youtu.be/x"))
+        # At least: N map yields + 1 "reducing..." yield + 1 final yield
+        assert len(results) >= 3
+        # Intermediate yields contain map progress markers
+        assert "**[1/" in results[0]
+        # Last yield is the final reduce result
+        assert results[-1] == "s"
+
+    def test_fallback_to_audio_when_no_subtitles(self, monkeypatch):
+        """When subtitles unavailable, downloads audio and transcribes."""
+        from config import OllamaConfig
+
+        monkeypatch.setattr(app, "load_config", lambda: OllamaConfig("h", 1, "m"))
+
+        class FakeSummarizer:
+            def __init__(self, *a):
+                pass
+
+            def summarize(self, text):
+                return "sum"
+
+        monkeypatch.setattr(app, "Summarizer", FakeSummarizer)
+        monkeypatch.setattr("youtube.validate_youtube_url", lambda u: u)
+        monkeypatch.setattr("youtube.fetch_subtitles", lambda url, **kw: None)
+        monkeypatch.setattr(
+            "youtube.download_audio", lambda url, **kw: "/tmp/audio.wav"
+        )
+
+        class FakeTranscriber:
+            def transcribe(self, path):
+                return TranscriptionResult(
+                    text="transcribed", language="ru", duration=1.0
+                )
+
+        monkeypatch.setattr(app, "get_transcriber", lambda *a: FakeTranscriber())
+
+        results = list(app._default_youtube_summarize("https://youtu.be/x"))
+        assert results[-1] == "sum"
+
+
 # ---------- make_summarize_handler ----------
 
 

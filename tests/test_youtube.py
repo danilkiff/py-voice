@@ -271,6 +271,44 @@ class TestFetchSubtitles:
         assert opts["writesubtitles"] is True
         assert opts["writeautomaticsub"] is True
 
+    def test_falls_back_to_first_entry_when_preferred_exts_empty(self):
+        """When preferred ext entries have no data, falls back to entries[0]."""
+        spy = SpyExtractInfo(
+            result={
+                "subtitles": {
+                    "ru": [
+                        {
+                            "ext": "json3",
+                            "data": "00:00:00.000 --> 00:00:01.000\nfallback",
+                        },
+                        {"ext": "vtt", "data": ""},
+                    ],
+                },
+            }
+        )
+        result = fetch_subtitles("https://youtu.be/abc12345678", extract_info=spy)
+        assert result is not None
+        assert "fallback" in result.text
+
+    def test_skips_preferred_ext_with_empty_data(self):
+        """Preferred ext entry exists but data is empty → try next."""
+        spy = SpyExtractInfo(
+            result={
+                "subtitles": {
+                    "ru": [
+                        {"ext": "vtt", "data": ""},
+                        {
+                            "ext": "srv1",
+                            "data": "00:00:00.000 --> 00:00:01.000\nsrv1text",
+                        },
+                    ],
+                },
+            }
+        )
+        result = fetch_subtitles("https://youtu.be/abc12345678", extract_info=spy)
+        assert result is not None
+        assert "srv1text" in result.text
+
     def test_default_langs(self):
         assert _SUBTITLE_LANGS == ("ru", "en")
 

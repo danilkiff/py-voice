@@ -38,3 +38,7 @@ source = ["device", "transcriber", "app", "main", "config", "summarizer", "youtu
 [tool.coverage.report]
 show_missing = true
 skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    '\) -> .*: \.\.\.',
+]

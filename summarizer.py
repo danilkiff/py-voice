@@ -20,7 +20,7 @@ SUMMARIZE_PROMPT = (
 HttpPost = Callable[[str, dict[str, Any]], Any]
 
 
-def _default_post(url: str, body: dict[str, Any]) -> Any:
+def _default_post(url: str, body: dict[str, Any]) -> Any:  # pragma: no cover
     import httpx  # lazy: keeps import cheap when httpx is unused
 
     with httpx.Client(timeout=120.0) as client:

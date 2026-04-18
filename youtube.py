@@ -80,14 +80,16 @@ def parse_subtitle_text(raw: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _default_extract_info(url: str, opts: dict[str, Any]) -> dict[str, Any]:
+def _default_extract_info(
+    url: str, opts: dict[str, Any]
+) -> dict[str, Any]:  # pragma: no cover
     import yt_dlp  # lazy
 
     with yt_dlp.YoutubeDL(opts) as ydl:
         return ydl.extract_info(url, download=False)  # type: ignore[return-value]
 
 
-def _default_download(url: str, opts: dict[str, Any]) -> str:
+def _default_download(url: str, opts: dict[str, Any]) -> str:  # pragma: no cover
     import yt_dlp  # lazy
 
     with yt_dlp.YoutubeDL(opts) as ydl:
