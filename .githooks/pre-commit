@@ -2,7 +2,7 @@
 set -euo pipefail
 
 echo "→ ruff fix"
-uv run ruff check --fix --select I .
+uv run ruff check --fix .
 uv run ruff format .
 
 # Re-stage files that ruff may have modified

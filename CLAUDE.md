@@ -45,7 +45,7 @@ device.py        → CUDA auto-detection via CTranslate2
 
 ## Code style
 
-- `uv run ruff check --fix --select I . && uv run ruff format .`
+- `uv run ruff check --fix . && uv run ruff format .`
 - Russian UI strings, English code/comments/commits.
 - Commit messages: conventional commits (`feat:`, `fix:`, `test:`, `docs:`, `chore:`, `refactor:`).
 

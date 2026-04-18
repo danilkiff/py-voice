@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -161,7 +160,6 @@ class TestFetchSubtitleContent:
 
     def test_fetches_from_url_when_no_data(self, monkeypatch):
         """When data is absent but url is present, fetch via httpx."""
-        import youtube
 
         class FakeResp:
             text = "00:00:00.000 --> 00:00:01.000\nfetched"
