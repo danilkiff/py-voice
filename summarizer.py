@@ -13,7 +13,9 @@ from __future__ import annotations
 from typing import Any, Callable
 
 SUMMARIZE_PROMPT = (
-    "Кратко изложи основные мысли следующего текста на русском языке:\n\n{text}"
+    "Выдели 2–3 ключевых тезиса из текста ниже. "
+    "Формат: маркированный список, каждый пункт — одно короткое предложение. "
+    "Без вводных слов, пояснений и выводов. Язык — русский.\n\n{text}"
 )
 
 # A callable with the same signature as the injectable hook.
