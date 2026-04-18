@@ -225,9 +225,8 @@ def build_app(
                     )
 
                 with gr.Row():
-                    summary_output = gr.Textbox(
+                    summary_output = gr.Markdown(
                         label="Краткое содержание",
-                        lines=8,
                     )
 
                 run_button.click(
@@ -259,9 +258,8 @@ def build_app(
                         )
 
                     with gr.Column():
-                        yt_output = gr.Textbox(
+                        yt_output = gr.Markdown(
                             label="Краткое содержание",
-                            lines=18,
                         )
 
                 yt_button.click(
