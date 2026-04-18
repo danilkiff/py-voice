@@ -16,6 +16,7 @@ from app import (
     _build_thumbnail_html,
     _format_timecode,
     _group_timed_segments,
+    _streaming_reduce,
     build_app,
     format_header,
     make_run_handler,
@@ -282,6 +283,39 @@ class TestGroupTimedSegments:
         segs = ((5.0, "a" * 10), (15.0, "b" * 10), (25.0, "c" * 10))
         groups = _group_timed_segments(segs, chunk_size=30)
         assert groups[0][0] == 5.0
+
+
+# ---------- _streaming_reduce ----------
+
+
+class TestStreamingReduce:
+    def test_short_combined_single_call(self):
+        """Combined text fits in MAX_REDUCE_INPUT → one progress + one result."""
+        results = list(_streaming_reduce("short", lambda t: "done", "pre\n"))
+        assert results[-1] == "done"
+        assert any("Финальная суммаризация" in r for r in results)
+
+    def test_long_combined_shows_progress(self, monkeypatch):
+        """Combined text exceeds MAX_REDUCE_INPUT → intermediate progress."""
+        monkeypatch.setattr("map_reduce.MAX_REDUCE_INPUT", 50)
+        monkeypatch.setattr("map_reduce.MAX_REDUCE_DEPTH", 2)
+
+        calls: list[str] = []
+
+        def shrink(text: str) -> str:
+            calls.append(text)
+            return "s"
+
+        big = "x" * 200
+        results = list(_streaming_reduce(big, shrink, ""))
+        assert results[-1] == "s"
+        # Should show intermediate "(N/M)" progress
+        assert any("Формирование итога…" in r and "/" in r for r in results)
+        assert len(calls) > 1
+
+    def test_prefix_preserved(self):
+        results = list(_streaming_reduce("text", lambda t: "r", "PREFIX\n"))
+        assert any(r.startswith("PREFIX\n") for r in results[:-1])
 
 
 # ---------- _default_youtube_summarize ----------

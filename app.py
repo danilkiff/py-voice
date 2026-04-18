@@ -90,12 +90,36 @@ def _group_timed_segments(
     return groups
 
 
+def _streaming_reduce(
+    combined: str,
+    summarize_fn: Callable[[str], str],
+    output_prefix: str,
+) -> Iterator[str]:
+    """Reduce phase with per-call progress yields."""
+    from map_reduce import MAX_REDUCE_DEPTH, MAX_REDUCE_INPUT, chunk_text
+
+    text = combined
+    depth = 0
+    while len(text) > MAX_REDUCE_INPUT and depth < MAX_REDUCE_DEPTH:
+        reduce_chunks = chunk_text(text)
+        reduce_sums: list[str] = []
+        for j, rc in enumerate(reduce_chunks):
+            yield output_prefix + (
+                f"---\n\n*Формирование итога… ({j + 1}/{len(reduce_chunks)})*\n"
+            )
+            reduce_sums.append(summarize_fn(rc))
+        text = "\n\n".join(reduce_sums)
+        depth += 1
+
+    yield output_prefix + "---\n\n*Финальная суммаризация…*\n"
+    yield summarize_fn(text)
+
+
 def _default_youtube_summarize(url: str) -> Iterator[str]:
     from map_reduce import (
         DEFAULT_CHUNK_SIZE,
         MAP_REDUCE_THRESHOLD,
         chunk_text,
-        map_reduce_summarize,
     )
     from youtube import download_audio, fetch_video_info, validate_youtube_url
 
@@ -144,10 +168,7 @@ def _default_youtube_summarize(url: str) -> Iterator[str]:
             yield output
 
         combined = "\n\n".join(summaries)
-        output += "---\n\n*Формирование итога…*\n"
-        yield output
-        final = map_reduce_summarize(combined, summarizer.summarize)
-        yield final
+        yield from _streaming_reduce(combined, summarizer.summarize, output)
         return
 
     # Untimed fallback: use chunk_text as before
@@ -161,10 +182,7 @@ def _default_youtube_summarize(url: str) -> Iterator[str]:
         yield output
 
     combined = "\n\n".join(summaries_plain)
-    output += "---\n\n*Формирование итога…*\n"
-    yield output
-    final = map_reduce_summarize(combined, summarizer.summarize)
-    yield final
+    yield from _streaming_reduce(combined, summarizer.summarize, output)
 
 
 def format_header(result: TranscriptionResult, model_size: str) -> str:
