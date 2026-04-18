@@ -1,0 +1,54 @@
+# CLAUDE.md
+
+## Project
+
+Russian audio transcription + YouTube video summarization. Gradio UI, faster-whisper STT, Ollama LLM.
+
+## Commands
+
+```bash
+uv sync              # install deps
+uv run pytest        # test (also runs on pre-commit)
+uv run main.py       # start app on 0.0.0.0:7860
+docker compose up --build  # full stack with Ollama
+```
+
+## Architecture
+
+```
+main.py          → entry point, launches Gradio
+app.py           → UI + handler factories (make_run_handler, make_summarize_handler, make_youtube_handler)
+transcriber.py   → faster-whisper wrapper, lazy model loading
+summarizer.py    → Ollama /api/generate client
+youtube.py       → yt-dlp subtitle fetch + audio download
+map_reduce.py    → chunk_text + recursive map-reduce summarize
+config.py        → OllamaConfig from env vars
+device.py        → CUDA auto-detection via CTranslate2
+```
+
+## Patterns — follow these
+
+- **Dependency injection** via callable parameters, not mocks. Every class/factory accepts optional injectable functions (`loader=`, `post=`, `extract_info=`). Defaults are private `_default_*` functions with lazy imports.
+- **Protocol typing** for injectable interfaces (`_Model`, `HttpPost`, `InfoExtractor`).
+- **Frozen dataclasses** for value objects (`TranscriptionResult`, `SubtitleResult`, `OllamaConfig`).
+- **Dataclass fakes** in tests (`FakeModel`, `SpyPost`, `SpyExtractInfo`). No `unittest.mock.Mock()`.
+- **Lazy imports** — heavy libs (`faster_whisper`, `yt_dlp`, `httpx`) imported inside function bodies, not at module level.
+- **Handler factories** — `make_*_handler(fn=None)` pattern decouples Gradio UI from business logic.
+- **Env var config** — no config files. `OLLAMA_HOST`, `OLLAMA_PORT`, `OLLAMA_MODEL`, `CHUNK_SIZE`, `MAP_REDUCE_THRESHOLD`, `MAX_REDUCE_INPUT`.
+
+## Testing
+
+- 100% branch coverage required. Pre-commit hook runs ruff + pytest.
+- Thin I/O wrappers (`_default_post`, `_default_extract_info`, `_default_download`) are `# pragma: no cover`.
+- Protocol method stubs excluded via `exclude_lines` in `pyproject.toml`.
+- New modules must be added to `--cov=` in `pyproject.toml` addopts and `[tool.coverage.run] source`.
+
+## Code style
+
+- `uv run ruff check --fix --select I . && uv run ruff format .`
+- Russian UI strings, English code/comments/commits.
+- Commit messages: conventional commits (`feat:`, `fix:`, `test:`, `docs:`, `chore:`, `refactor:`).
+
+## ADRs
+
+Architectural decisions documented in `docs/adr/` (MADR format, English).
