@@ -54,17 +54,21 @@ def _default_youtube_summarize(url: str) -> Iterator[str]:
     summarizer = Summarizer(cfg.base_url, cfg.model)
 
     # Fast path: try subtitles first
+    yield "Получение субтитров…"
     sub_result = fetch_subtitles(url)
     if sub_result is not None:
         text = sub_result.text
     else:
         # Slow path: download audio, transcribe
+        yield "Субтитры не найдены. Загрузка аудио…"
         audio_path = download_audio(url)
+        yield "Транскрибация аудио…"
         transcription = get_transcriber().transcribe(str(audio_path))
         text = transcription.text
 
     # Short text — single call, no streaming needed
     if len(text) <= MAP_REDUCE_THRESHOLD:
+        yield "Суммаризация…"
         yield summarizer.summarize(text)
         return
 
@@ -103,7 +107,7 @@ def write_text_file(stem: str, text: str, directory: Path | None = None) -> Path
 def make_run_handler(
     transcribe_fn: TranscribeFn | None = None,
     output_dir: Path | None = None,
-) -> Callable[[str | None, str], tuple[str, str | None]]:
+) -> Callable[[str | None, str], Iterator[tuple[str, str | None]]]:
     """Build a Gradio click handler. transcribe_fn is injectable for tests.
 
     The default is resolved at call time (not at def-time) so monkeypatching
@@ -113,31 +117,37 @@ def make_run_handler(
         transcribe_fn if transcribe_fn is not None else _default_transcribe
     )
 
-    def run(audio_path: str | None, model_size: str) -> tuple[str, str | None]:
+    def run(
+        audio_path: str | None, model_size: str
+    ) -> Iterator[tuple[str, str | None]]:
         if not audio_path:
-            return EMPTY_INPUT_MESSAGE, None
+            yield EMPTY_INPUT_MESSAGE, None
+            return
 
+        yield "Транскрибация…", None
         result = fn(audio_path, model_size)
         text = format_header(result, model_size) + result.text
         out_path = write_text_file(Path(audio_path).stem, text, output_dir)
-        return text, str(out_path)
+        yield text, str(out_path)
 
     return run
 
 
 def make_summarize_handler(
     summarize_fn: SummarizeFn | None = None,
-) -> Callable[[str], str]:
+) -> Callable[[str], Iterator[str]]:
     """Build a Gradio click handler for summarization. summarize_fn is injectable for tests."""
     fn: SummarizeFn = summarize_fn if summarize_fn is not None else _default_summarize
 
-    def summarize(transcript: str) -> str:
+    def summarize(transcript: str) -> Iterator[str]:
         if not transcript or not transcript.strip():
-            return EMPTY_TRANSCRIPT_MESSAGE
+            yield EMPTY_TRANSCRIPT_MESSAGE
+            return
         try:
-            return fn(transcript)
+            yield "Суммаризация…"
+            yield fn(transcript)
         except Exception:
-            return OLLAMA_UNAVAILABLE
+            yield OLLAMA_UNAVAILABLE
 
     return summarize
 

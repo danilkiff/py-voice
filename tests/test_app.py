@@ -22,6 +22,15 @@ from app import (
 )
 from transcriber import TranscriptionResult
 
+
+def _last(gen):
+    """Consume a generator and return its last yielded value."""
+    value = None
+    for value in gen:
+        pass
+    return value
+
+
 # ---------- constants ----------
 
 
@@ -89,13 +98,13 @@ def _fake_transcribe(audio_path: str, model_size: str) -> TranscriptionResult:
 class TestMakeRunHandler:
     def test_no_audio_returns_message_and_no_file(self, tmp_path):
         run = make_run_handler(transcribe_fn=_fake_transcribe, output_dir=tmp_path)
-        text, file_path = run(None, "tiny")
+        text, file_path = _last(run(None, "tiny"))
         assert text == EMPTY_INPUT_MESSAGE
         assert file_path is None
 
     def test_empty_string_audio_returns_message(self, tmp_path):
         run = make_run_handler(transcribe_fn=_fake_transcribe, output_dir=tmp_path)
-        text, file_path = run("", "tiny")
+        text, file_path = _last(run("", "tiny"))
         assert text == EMPTY_INPUT_MESSAGE
         assert file_path is None
 
@@ -103,7 +112,7 @@ class TestMakeRunHandler:
         audio = tmp_path / "voice.wav"
         audio.write_bytes(b"RIFF")
         run = make_run_handler(transcribe_fn=_fake_transcribe, output_dir=tmp_path)
-        text, file_path = run(str(audio), "large-v3")
+        text, file_path = _last(run(str(audio), "large-v3"))
         assert "Язык: ru" in text
         assert "Модель: large-v3" in text
         assert "text-of-voice" in text
@@ -114,7 +123,7 @@ class TestMakeRunHandler:
         audio = tmp_path / "lecture.mp3"
         audio.write_bytes(b"")
         run = make_run_handler(transcribe_fn=_fake_transcribe, output_dir=tmp_path)
-        _, file_path = run(str(audio), "tiny")
+        _, file_path = _last(run(str(audio), "tiny"))
         assert Path(file_path).name == "lecture.txt"
 
     def test_transcribe_fn_receives_args(self, tmp_path):
@@ -125,7 +134,7 @@ class TestMakeRunHandler:
             return TranscriptionResult(text="ok", language="ru", duration=1.0)
 
         run = make_run_handler(transcribe_fn=spy, output_dir=tmp_path)
-        run("/some/file.wav", "small")
+        _last(run("/some/file.wav", "small"))
         assert seen == [("/some/file.wav", "small")]
 
     def test_default_transcribe_fn_uses_get_transcriber(self, monkeypatch):
@@ -139,8 +148,16 @@ class TestMakeRunHandler:
         # Re-build the handler so it captures the patched default.
         run = app.make_run_handler()
         # We need a real path to satisfy the truthy check.
-        run("/x.wav", "tiny")
+        _last(run("/x.wav", "tiny"))
         assert called["args"] == ("/x.wav", "tiny")
+
+    def test_yields_progress_before_result(self, tmp_path):
+        audio = tmp_path / "a.wav"
+        audio.write_bytes(b"")
+        run = make_run_handler(transcribe_fn=_fake_transcribe, output_dir=tmp_path)
+        steps = list(run(str(audio), "tiny"))
+        assert len(steps) == 2
+        assert steps[0] == ("Транскрибация…", None)
 
 
 # ---------- _default_transcribe ----------
@@ -218,8 +235,9 @@ class TestDefaultYoutubeSummarize:
         monkeypatch.setattr("youtube.validate_youtube_url", lambda u: u)
 
         results = list(app._default_youtube_summarize("https://youtu.be/x"))
-        assert len(results) == 1
-        assert results[0] == "sum(short)"
+        assert results[-1] == "sum(short)"
+        assert "Получение субтитров…" in results
+        assert "Суммаризация…" in results
 
     def test_long_text_streams_map_then_reduce(self, monkeypatch):
         """Long text → multiple map yields + reduce yield."""
@@ -247,10 +265,10 @@ class TestDefaultYoutubeSummarize:
         monkeypatch.setattr("youtube.validate_youtube_url", lambda u: u)
 
         results = list(app._default_youtube_summarize("https://youtu.be/x"))
-        # At least: N map yields + 1 "reducing..." yield + 1 final yield
-        assert len(results) >= 3
+        # At least: progress + N map yields + 1 "reducing..." yield + 1 final
+        assert len(results) >= 4
         # Intermediate yields contain map progress markers
-        assert "**[1/" in results[0]
+        assert any("**[1/" in r for r in results)
         # Last yield is the final reduce result
         assert results[-1] == "s"
 
@@ -284,6 +302,8 @@ class TestDefaultYoutubeSummarize:
 
         results = list(app._default_youtube_summarize("https://youtu.be/x"))
         assert results[-1] == "sum"
+        assert "Субтитры не найдены. Загрузка аудио…" in results
+        assert "Транскрибация аудио…" in results
 
 
 # ---------- make_summarize_handler ----------
@@ -296,15 +316,15 @@ def _fake_summarize(text: str) -> str:
 class TestMakeSummarizeHandler:
     def test_empty_string_returns_empty_transcript_message(self):
         summarize = make_summarize_handler(summarize_fn=_fake_summarize)
-        assert summarize("") == EMPTY_TRANSCRIPT_MESSAGE
+        assert _last(summarize("")) == EMPTY_TRANSCRIPT_MESSAGE
 
     def test_whitespace_only_returns_empty_transcript_message(self):
         summarize = make_summarize_handler(summarize_fn=_fake_summarize)
-        assert summarize("   ") == EMPTY_TRANSCRIPT_MESSAGE
+        assert _last(summarize("   ")) == EMPTY_TRANSCRIPT_MESSAGE
 
     def test_valid_transcript_returns_summary(self):
         summarize = make_summarize_handler(summarize_fn=_fake_summarize)
-        assert summarize("реальный текст") == "summary-of:реальный текст"
+        assert _last(summarize("реальный текст")) == "summary-of:реальный текст"
 
     def test_summarize_fn_receives_full_transcript(self):
         seen: list[str] = []
@@ -313,7 +333,7 @@ class TestMakeSummarizeHandler:
             seen.append(text)
             return "ok"
 
-        make_summarize_handler(summarize_fn=spy)("некоторый текст")
+        _last(make_summarize_handler(summarize_fn=spy)("некоторый текст"))
         assert seen == ["некоторый текст"]
 
     def test_exception_returns_ollama_unavailable(self):
@@ -321,7 +341,7 @@ class TestMakeSummarizeHandler:
             raise ConnectionError("refused")
 
         summarize = make_summarize_handler(summarize_fn=boom)
-        assert summarize("текст") == OLLAMA_UNAVAILABLE
+        assert _last(summarize("текст")) == OLLAMA_UNAVAILABLE
 
     def test_default_summarize_fn_used_when_not_injected(self, monkeypatch):
         called = {}
@@ -332,9 +352,15 @@ class TestMakeSummarizeHandler:
 
         monkeypatch.setattr(app, "_default_summarize", fake_default)
         summarize = app.make_summarize_handler()
-        result = summarize("входной текст")
+        result = _last(summarize("входной текст"))
         assert result == "краткое содержание"
         assert called["text"] == "входной текст"
+
+    def test_yields_progress_before_result(self):
+        summarize = make_summarize_handler(summarize_fn=_fake_summarize)
+        steps = list(summarize("текст"))
+        assert len(steps) == 2
+        assert steps[0] == "Суммаризация…"
 
 
 # ---------- make_youtube_handler ----------
@@ -342,14 +368,6 @@ class TestMakeSummarizeHandler:
 
 def _fake_youtube_summarize(url: str):
     yield f"yt-summary-of:{url}"
-
-
-def _last(gen):
-    """Consume a generator and return its last yielded value."""
-    value = None
-    for value in gen:
-        pass
-    return value
 
 
 class TestMakeYoutubeHandler:
