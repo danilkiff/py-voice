@@ -313,6 +313,28 @@ class TestFetchSubtitles:
         assert result is not None
         assert "srv1text" in result.text
 
+    def test_prefers_vtt_over_srv1(self):
+        """VTT should be selected even when srv1 appears first in entries."""
+        spy = SpyExtractInfo(
+            result={
+                "subtitles": {
+                    "ru": [
+                        {
+                            "ext": "srv1",
+                            "data": "00:00:00.000 --> 00:00:01.000\nsrv1",
+                        },
+                        {
+                            "ext": "vtt",
+                            "data": "00:00:00.000 --> 00:00:01.000\nvtt",
+                        },
+                    ],
+                },
+            }
+        )
+        result = fetch_subtitles("https://youtu.be/abc12345678", extract_info=spy)
+        assert result is not None
+        assert "vtt" in result.text
+
     def test_default_langs(self):
         assert _SUBTITLE_LANGS == ("ru", "en")
 

@@ -246,18 +246,23 @@ def _fetch_subtitle_content(entry: dict[str, Any]) -> str:
 def _find_best_subtitle(
     info: dict[str, Any], langs: tuple[str, ...]
 ) -> tuple[str, str] | None:
-    """Return (raw_subtitle_text, language) from *info*, or ``None``."""
+    """Return (raw_subtitle_text, language) from *info*, or ``None``.
+
+    Prefers VTT over SRT over srv1 so that ``parse_subtitle_timed``
+    can extract timestamps (srv1 is XML and needs separate parsing).
+    """
     for source_key in ("subtitles", "automatic_captions"):
         subs = info.get(source_key) or {}
         for lang in langs:
             entries = subs.get(lang)
             if not entries:
                 continue
-            for entry in entries:
-                if entry.get("ext") in ("vtt", "srv1", "srt"):
-                    raw = _fetch_subtitle_content(entry)
-                    if raw:
-                        return raw, lang
+            for preferred_ext in ("vtt", "srt", "srv1"):
+                for entry in entries:
+                    if entry.get("ext") == preferred_ext:
+                        raw = _fetch_subtitle_content(entry)
+                        if raw:
+                            return raw, lang
             raw = _fetch_subtitle_content(entries[0])
             if raw:
                 return raw, lang
